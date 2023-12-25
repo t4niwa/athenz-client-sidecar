@@ -47,6 +47,7 @@ type RoleService interface {
 	GetRoleProvider() RoleProvider
 	TokenCacheLen() int
 	TokenCacheSize() int64
+	StoreTokenCache(string, string, string, string)
 }
 
 // roleService represents the implementation of Athenz RoleService
@@ -309,6 +310,21 @@ func (a *roleService) TokenCacheSize() int64 {
 	return a.memoryUsage
 }
 
+// TODO: store cache deta
+func (r *roleService) StoreTokenCache(key, token, domain, role string) {
+	rcd := &cacheData{
+		domain: domain,
+		role:   role,
+		token: &RoleToken{
+			Token:      token,
+			ExpiryTime: 0,
+		},
+	}
+	r.domainRoleCache.SetWithExpire(key, rcd, -1)
+	r.memoryUsage += roleCacheMemoryUsage(rcd)
+	r.memoryUsage += int64(len(key))
+}
+
 // updateRoleTokenWithRetry wraps updateRoleToken with retry logic.
 func (r *roleService) updateRoleTokenWithRetry(ctx context.Context, domain, role, proxyForPrincipal string, minExpiry, maxExpiry int64) <-chan error {
 	glg.Debugf("updateRoleTokenWithRetry started, domain: %s, role: %s, proxyForPrincipal: %s, minExpiry: %d, maxExpiry: %d", domain, role, proxyForPrincipal, minExpiry, maxExpiry)
@@ -355,6 +371,7 @@ func (r *roleService) updateRoleToken(ctx context.Context, domain, role, proxyFo
 
 		// TODO:
 		r.memoryUsage += roleCacheMemoryUsage(cd)
+		r.memoryUsage += int64(len(key))
 
 		glg.Debugf("token is cached, domain: %s, role: %s, proxyForPrincipal: %s, expiry time: %v", domain, role, proxyForPrincipal, rt.ExpiryTime)
 		return rt, nil

@@ -16,6 +16,7 @@ package router
 
 import (
 	"net/http"
+	"net/http/pprof"
 
 	"github.com/AthenZ/athenz-client-sidecar/v2/config"
 	"github.com/AthenZ/athenz-client-sidecar/v2/handler"
@@ -95,5 +96,21 @@ func NewRoutes(cfg config.Config, h handler.Handler) []Route {
 		})
 	}
 
+	r = append(r, Route{
+		"Debug heap profile",
+		[]string{
+			http.MethodGet,
+		},
+		"/debug/pprof/heap",
+		toHandler(pprof.Handler("heap").ServeHTTP),
+	})
+
 	return r
+}
+
+func toHandler(f http.HandlerFunc) func(w http.ResponseWriter, r *http.Request) error {
+	return func(w http.ResponseWriter, r *http.Request) error {
+		f(w, r)
+		return nil
+	}
 }

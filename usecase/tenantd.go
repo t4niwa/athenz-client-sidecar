@@ -171,6 +171,8 @@ func (t *clientd) Start(ctx context.Context) chan []error {
 		}
 	}()
 
+	testing(t)
+
 	return t.server.ListenAndServe(ctx)
 }
 
