@@ -840,12 +840,7 @@ func Test_accessService_GetAccessProvider(t *testing.T) {
 func Test_accessService_TokenCacheLen(t *testing.T) {
 	type fields struct {
 		cfg        config.AccessToken
-		token      ntokend.TokenProvider
 		tokenCache gache.Gache
-		expiry     time.Duration
-	}
-	type args struct {
-		ctx context.Context
 	}
 	type test struct {
 		name   string
@@ -864,25 +859,18 @@ func Test_accessService_TokenCacheLen(t *testing.T) {
 				token: dummyToken,
 			}, time.Minute)
 			return test{
-				name: "StartAccessUpdater can update cache periodically",
+				name: "TokenCacheLen() exactly return tokenCache.Len()",
 				fields: fields{
 					tokenCache: tokenCache,
-					expiry:     time.Second,
-					token: func() (string, error) {
-						return "dummy N-token", nil
-					},
 				},
-				want: 1,
+				want: tokenCache.Len(),
 			}
 		}(),
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a := &accessService{
-				cfg:        tt.fields.cfg,
-				token:      tt.fields.token,
 				tokenCache: tt.fields.tokenCache,
-				expiry:     tt.fields.expiry,
 			}
 			got := a.TokenCacheLen()
 			if !reflect.DeepEqual(got, tt.want) {
@@ -894,98 +882,30 @@ func Test_accessService_TokenCacheLen(t *testing.T) {
 
 func Test_accessService_TokenCacheSize(t *testing.T) {
 	type fields struct {
-		cfg                   config.AccessToken
-		token                 ntokend.TokenProvider
-		athenzURL             string
-		athenzPrincipleHeader string
-		tokenCache            gache.Gache
-		expiry                time.Duration
-		httpClient            atomic.Value
-	}
-	type args struct {
-		ctx               context.Context
-		domain            string
-		role              string
-		proxyForPrincipal string
-		expiresIn         int64
+		memoryUsage int64
 	}
 	type test struct {
-		name      string
-		fields    fields
-		args      args
-		afterFunc func() error
-		want      int64
+		name   string
+		fields fields
+		want   int64
 	}
 	tests := []test{
 		func() test {
-			dummyTok, err := makeAccessTokenImpl("dummyDomain", "dummyRole", 60)
-			if err != nil {
-				fmt.Errorf("Failed to make access token: %v", err)
-			}
-			dummyExpTime := int64(999999999)
-			dummyToken := fmt.Sprintf(`{"access_token":"%v","token_type":"Bearer","expires_in":%v,"scope":"dummyDomain:dummyRole"}"`, dummyTok, dummyExpTime)
-
-			var sampleHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				fmt.Fprint(w, dummyToken)
-			})
-			dummyServer := httptest.NewTLSServer(sampleHandler)
-
-			var httpClient atomic.Value
-			httpClient.Store(dummyServer.Client())
 			return test{
-				name: "Check correct size is output when cache exists",
+				name: "TokenCacheSize exactly return memoryUsage field",
 				fields: fields{
-					httpClient: httpClient,
-					tokenCache: gache.New(),
-					token: func() (string, error) {
-						return dummyToken, nil
-					},
-					athenzURL:             dummyServer.URL,
-					athenzPrincipleHeader: "Athenz-Principal",
+					memoryUsage: 100,
 				},
-				args: args{
-					ctx:               context.Background(),
-					domain:            "dummyDomain",
-					role:              "dummyRole",
-					proxyForPrincipal: "dummyProxy",
-					expiresIn:         1,
-				},
-				afterFunc: func() error {
-					dummyServer.Close()
-					return nil
-				},
-				want: 426,
+				want: 100,
 			}
 		}(),
 	}
 	for _, tt := range tests {
-		if tt.afterFunc != nil {
-			defer func() {
-				err := tt.afterFunc()
-				if err != nil {
-					t.Errorf("accessService.TokenCacheSize() afterFunc error: %v", err)
-				}
-			}()
-		}
-
 		t.Run(tt.name, func(t *testing.T) {
 			a := &accessService{
-				cfg:                   tt.fields.cfg,
-				token:                 tt.fields.token,
-				athenzURL:             tt.fields.athenzURL,
-				athenzPrincipleHeader: tt.fields.athenzPrincipleHeader,
-				tokenCache:            tt.fields.tokenCache,
-				expiry:                tt.fields.expiry,
-				httpClient:            tt.fields.httpClient,
+				memoryUsage: tt.fields.memoryUsage,
 			}
-
-			_, err := a.updateAccessToken(tt.args.ctx, tt.args.domain, tt.args.role, tt.args.proxyForPrincipal, tt.args.expiresIn)
 			got := a.TokenCacheSize()
-			if err != nil {
-				t.Errorf("failed to updateAccessToken, err: %v", err)
-				return
-			}
-
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("roleService.TokenCacheSize() = %v, want %v", got, tt.want)
 			}
@@ -2150,6 +2070,14 @@ func Test_accessService_updateAccessToken(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TODO:
+func Test_accessService_storeTokenCache(t *testing.T) {
+}
+
+// TODO:
+func Test_accessService_accessCacheMemoryUsage(t *testing.T) {
 }
 
 func Test_accessService_fetchAccessToken(t *testing.T) {
