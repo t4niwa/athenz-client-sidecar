@@ -238,13 +238,8 @@ func (a *accessService) StartAccessUpdater(ctx context.Context) <-chan error {
 	a.tokenCache.StartExpired(ctx, cachePurgePeriod)
 	a.tokenCache.EnableExpiredHook().SetExpiredHook(func(ctx context.Context, k string) {
 		glg.Warnf("the following cache is expired, key: %v", k)
-
-		if val, ok := a.tokenCache.Get(k); ok {
-			if data, ok := val.(*accessCacheData); ok {
-				size := accessCacheMemoryUsage(data)
-				a.memoryUsage -= size
-			}
-		}
+		// TODO: 「ログに出力されてるtotal:cached_token_bytesが多く見積もられる可能性がある」というwaningを英語で出す
+		glg.Warnf("total:cached_token_bytes may be overestimated")
 	})
 	return ech
 }
@@ -356,18 +351,8 @@ func (a *accessService) updateAccessToken(ctx context.Context, domain, role, pro
 			expiry:            expTime.Unix(),
 			scope:             at.Scope,
 		}
-		oldTokenCacheData, _ := a.tokenCache.Get(key)
-		a.tokenCache.SetWithExpire(key, acd, expTime.Sub(expTimeDelta))
-		if oldTokenCacheData != nil {
-			if oldTokenCache, ok := oldTokenCacheData.(*accessCacheData); ok {
-				oldTokenCacheSize := accessCacheMemoryUsage(oldTokenCache)
-				a.memoryUsage += accessCacheMemoryUsage(acd) - oldTokenCacheSize
-			}
-		} else {
-			a.memoryUsage += accessCacheMemoryUsage(acd)
-			a.memoryUsage += int64(len(key))
-		}
 
+		a.storeTokenCache(key, acd, expTimeDelta, expTime)
 		glg.Debugf("token is cached, domain: %s, role: %s, proxyForPrincipal: %s, expiry time: %v", domain, role, proxyForPrincipal, expTime.Unix())
 		return at, nil
 	})
@@ -376,6 +361,20 @@ func (a *accessService) updateAccessToken(ctx context.Context, domain, role, pro
 	}
 
 	return at.(*AccessTokenResponse), err
+}
+
+func (a *accessService) storeTokenCache(key string, acd *accessCacheData, expTimeDelta time.Time, expTime *jwt.NumericDate) {
+	oldTokenCacheData, _ := a.tokenCache.Get(key)
+	a.tokenCache.SetWithExpire(key, acd, expTime.Sub(expTimeDelta))
+	if oldTokenCacheData != nil {
+		if oldTokenCache, ok := oldTokenCacheData.(*accessCacheData); ok {
+			oldTokenCacheSize := accessCacheMemoryUsage(oldTokenCache)
+			a.memoryUsage += accessCacheMemoryUsage(acd) - oldTokenCacheSize
+		}
+	} else {
+		a.memoryUsage += accessCacheMemoryUsage(acd)
+		a.memoryUsage += int64(len(key))
+	}
 }
 
 func accessCacheMemoryUsage(acd *accessCacheData) int64 {
