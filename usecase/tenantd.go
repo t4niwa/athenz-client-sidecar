@@ -171,7 +171,7 @@ func (t *clientd) Start(ctx context.Context) chan []error {
 		}
 	}()
 
-	testing(t)
+	// testing(t)
 
 	return t.server.ListenAndServe(ctx)
 }
@@ -219,7 +219,7 @@ func report(t *clientd) {
 		return f / 1024 / 1024
 	}
 
-	glg.Infof("system_memory_inuse[%.1fMB]; go_memstats_heap_alloc_bytes[%.1fMB]; accesstoken:cached_token_bytes[%.1fMB],entries[%d]; roletoken:cached_token_bytes[%.1fMB],entries[%d]; cache_token_ratio:sys[%.1f%%],heap[%.1f%%]", toMB(sysMemValue-releasedHeapMemValue), toMB(heapMemValue), toMB(float64(atcSize)), atcLen, toMB(float64(rtcSize)), rtcLen, float64(atcSize+rtcSize)/sysMemValue*100, float64(atcSize+rtcSize)/heapMemValue*100)
+	glg.Infof("system_memory_inuse[%.1fMB]; go_memstats_heap_alloc_bytes[%.1fMB]; accesstoken:cached_token_bytes[%.1fMB],entries[%d]; roletoken:cached_token_bytes[%.1fMB],entries[%d]; total:cached_token_bytes[%.1fMB],entries[%d]; cache_token_ratio:sys[%.1f%%],heap[%.1f%%]", toMB(sysMemValue-releasedHeapMemValue), toMB(heapMemValue), toMB(float64(atcSize)), atcLen, toMB(float64(rtcSize)), rtcLen, toMB(float64(atcSize+rtcSize)), atcLen+rtcLen, float64(atcSize+rtcSize)/sysMemValue*100, float64(atcSize+rtcSize)/heapMemValue*100)
 }
 
 // createNtokend returns a TokenService object or any error

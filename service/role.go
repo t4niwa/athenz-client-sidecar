@@ -47,7 +47,7 @@ type RoleService interface {
 	GetRoleProvider() RoleProvider
 	TokenCacheLen() int
 	TokenCacheSize() int64
-	StoreTokenCache(string, string, string, string)
+	StoreTokenCache(string, string, string, string) // TODO: remove this function
 }
 
 // roleService represents the implementation of Athenz RoleService
@@ -252,7 +252,6 @@ func (r *roleService) StartRoleUpdater(ctx context.Context) <-chan error {
 	r.domainRoleCache.EnableExpiredHook().SetExpiredHook(func(ctx context.Context, k string) {
 		glg.Warnf("the following cache is expired, key: %v", k)
 
-		// TODO:
 		if val, ok := r.domainRoleCache.Get(k); ok {
 			if data, ok := val.(*cacheData); ok {
 				size := roleCacheMemoryUsage(data)
@@ -300,17 +299,15 @@ func (r *roleService) RefreshRoleTokenCache(ctx context.Context) <-chan error {
 	return echan
 }
 
-// TODO:
 func (a *roleService) TokenCacheLen() int {
 	return a.domainRoleCache.Len()
 }
 
-// TODO:
 func (a *roleService) TokenCacheSize() int64 {
 	return a.memoryUsage
 }
 
-// TODO: store cache deta
+// TODO: remove this function
 func (r *roleService) StoreTokenCache(key, token, domain, role string) {
 	rcd := &cacheData{
 		domain: domain,

@@ -46,7 +46,7 @@ type AccessService interface {
 	GetAccessProvider() AccessProvider
 	TokenCacheLen() int
 	TokenCacheSize() int64
-	StoreTokenCache(string, string, string, string)
+	StoreTokenCache(string, string, string, string) // TODO: remove this function
 }
 
 // accessService represents the implementation of Athenz AccessService
@@ -56,7 +56,7 @@ type accessService struct {
 	athenzURL             string
 	athenzPrincipleHeader string
 	tokenCache            gache.Gache
-	memoryUsage           int64 // TODO:
+	memoryUsage           int64
 	group                 singleflight.Group
 	expiry                time.Duration
 	httpClient            atomic.Value
@@ -240,13 +240,12 @@ func (a *accessService) StartAccessUpdater(ctx context.Context) <-chan error {
 	a.tokenCache.EnableExpiredHook().SetExpiredHook(func(ctx context.Context, k string) {
 		glg.Warnf("the following cache is expired, key: %v", k)
 
-		// TODO:
-		// if val, ok := a.tokenCache.Get(k); ok {
-		// 	if data, ok := val.(*accessCacheData); ok {
-		// 		size := accessCacheMemoryUsage(data)
-		// 		a.memoryUsage -= size
-		// 	}
-		// }
+		if val, ok := a.tokenCache.Get(k); ok {
+			if data, ok := val.(*accessCacheData); ok {
+				size := accessCacheMemoryUsage(data)
+				a.memoryUsage -= size
+			}
+		}
 	})
 	return ech
 }
@@ -297,17 +296,15 @@ func (a *accessService) RefreshAccessTokenCache(ctx context.Context) <-chan erro
 	return echan
 }
 
-// TODO:
 func (a *accessService) TokenCacheLen() int {
 	return a.tokenCache.Len()
 }
 
-// TODO:
 func (a *accessService) TokenCacheSize() int64 {
 	return a.memoryUsage
 }
 
-// TODO: store cache deta
+// TODO: remove this function
 func (a *accessService) StoreTokenCache(key, domain, token, role string) {
 	acd := &accessCacheData{
 		token:  string(token),
@@ -318,6 +315,7 @@ func (a *accessService) StoreTokenCache(key, domain, token, role string) {
 	}
 	a.tokenCache.SetWithExpire(key, acd, -1)
 	a.memoryUsage += int64(accessCacheMemoryUsage(acd))
+	a.memoryUsage += int64(len(key))
 }
 
 // updateAccessTokenWithRetry wraps updateAccessToken with retry logic.
@@ -375,7 +373,6 @@ func (a *accessService) updateAccessToken(ctx context.Context, domain, role, pro
 		}
 		a.tokenCache.SetWithExpire(key, acd, expTime.Sub(expTimeDelta))
 
-		// TODO:
 		a.memoryUsage += accessCacheMemoryUsage(acd)
 		a.memoryUsage += int64(len(key))
 
@@ -389,7 +386,6 @@ func (a *accessService) updateAccessToken(ctx context.Context, domain, role, pro
 	return at.(*AccessTokenResponse), err
 }
 
-// TODO:
 func accessCacheMemoryUsage(acd *accessCacheData) int64 {
 	tokenSize := int64(unsafe.Sizeof(acd.token)) + int64(len(acd.token))
 	domainSize := int64(unsafe.Sizeof(acd.domain)) + int64(len(acd.domain))

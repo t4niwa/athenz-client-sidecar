@@ -3,6 +3,9 @@ package usecase
 import (
 	"crypto/rand"
 	"fmt"
+	"os"
+	"runtime"
+	"runtime/pprof"
 	"sort"
 	"strings"
 	"time"
@@ -10,19 +13,13 @@ import (
 	"github.com/kpango/glg"
 )
 
-// TODO: remove this testing function
-// func testingCache(c *clientd, report func()) {
 func testing(c *clientd) {
-	// go func() {
-	// 	glg.Warn("🌟pprof server start~")
-	// 	http.ListenAndServe("localhost:8080", nil)
-	// }()
 	go func() {
 
-		time.Sleep(5 * time.Second)
-		addDummy := func(startIndex int) {
+		time.Sleep(30 * time.Second)
+		addDummy := func(startIndex, count int) {
 			glg.Warn("🌟Generating fake tokens for testing ...")
-			for i := startIndex; i < startIndex+20000; i++ {
+			for i := startIndex; i < startIndex+count; i++ {
 				// generate random token
 				key := encode(fmt.Sprintf("domain%d", i), fmt.Sprintf("role%d", i), "proxyForPrincipal")
 
@@ -38,24 +35,28 @@ func testing(c *clientd) {
 
 			glg.Warn("🌟Generating fake tokens for testing ...END")
 			time.Sleep(500 * time.Millisecond)
-			// f, _ := os.Create(fmt.Sprintf("/tmp/pprof/profile.pb.%07d.gz", startIndex))
-			// defer f.Close()
-			// runtime.GC()
-			// pprof.WriteHeapProfile(f) // heap dump to file
-			// report()                  // log cache size
+			f, _ := os.Create(fmt.Sprintf("/tmp/pprof/profile.pb.%07d.gz", startIndex))
+			defer f.Close()
+			runtime.GC()
+			pprof.WriteHeapProfile(f) // heap dump to file
+			report(c)                 // log cache size
 		}
 
 		// 20k each call for each type, to 100k token (total 200k at+rt)
-		addDummy(0)
-		addDummy(20000)
-		addDummy(40000)
-		addDummy(60000)
-		addDummy(80000)
-		addDummy(100000)
-		// addDummy(120000)
-		// addDummy(140000)
-		// addDummy(160000)
-		// addDummy(180000)
+		addDummy(0, 2000)
+		addDummy(2000, 2000)
+		addDummy(4000, 2000)
+		addDummy(6000, 2000)
+		addDummy(8000, 12000)
+		addDummy(20000, 20000)
+		addDummy(40000, 20000)
+		addDummy(60000, 20000)
+		addDummy(80000, 120000)
+		addDummy(200000, 20000)
+		addDummy(220000, 20000)
+		addDummy(240000, 20000)
+		addDummy(260000, 20000)
+		addDummy(280000, 120000)
 
 		// ls | xargs -r -L 1 go tool pprof -inuse_space -top
 	}()
