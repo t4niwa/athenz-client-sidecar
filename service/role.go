@@ -364,11 +364,17 @@ func (r *roleService) updateRoleToken(ctx context.Context, domain, role, proxyFo
 			minExpiry:         minExpiry,
 			maxExpiry:         maxExpiry,
 		}
+		oldTokenCacheData, _ := r.domainRoleCache.Get(key)
 		r.domainRoleCache.SetWithExpire(key, cd, time.Unix(rt.ExpiryTime, 0).Sub(expTimeDelta))
-
-		// TODO:
-		r.memoryUsage += roleCacheMemoryUsage(cd)
-		r.memoryUsage += int64(len(key))
+		if oldTokenCacheData != nil {
+			if oldTokenCache, ok := oldTokenCacheData.(*cacheData); ok {
+				oldTokenCacheSize := roleCacheMemoryUsage(oldTokenCache)
+				r.memoryUsage += roleCacheMemoryUsage(cd) - oldTokenCacheSize
+			}
+		} else {
+			r.memoryUsage += roleCacheMemoryUsage(cd)
+			r.memoryUsage += int64(len(key))
+		}
 
 		glg.Debugf("token is cached, domain: %s, role: %s, proxyForPrincipal: %s, expiry time: %v", domain, role, proxyForPrincipal, rt.ExpiryTime)
 		return rt, nil
@@ -380,17 +386,15 @@ func (r *roleService) updateRoleToken(ctx context.Context, domain, role, proxyFo
 	return rt.(*RoleToken), err
 }
 
-// TODO:
-func roleCacheMemoryUsage(data *cacheData) int64 {
-	tokenSize := int64(unsafe.Sizeof(data.token)) + int64(len(data.token.Token))
-	expiryTimeSize := int64(unsafe.Sizeof(data.token.ExpiryTime)) + int64(len(strconv.FormatInt(data.token.ExpiryTime, 10)))
-	domainSize := int64(unsafe.Sizeof(data.domain)) + int64(len(data.domain))
-	roleSize := int64(unsafe.Sizeof(data.role)) + int64(len(data.role))
-	proxyForPrincipalSize := int64(unsafe.Sizeof(data.proxyForPrincipal)) + int64(len(data.proxyForPrincipal))
-	minExpirySize := int64(unsafe.Sizeof(data.minExpiry))
-	maxExpirySize := int64(unsafe.Sizeof(data.maxExpiry))
-
-	return tokenSize + expiryTimeSize + domainSize + roleSize + proxyForPrincipalSize + minExpirySize + maxExpirySize
+func roleCacheMemoryUsage(cd *cacheData) int64 {
+	structSize := int64(unsafe.Sizeof(*cd))
+	stringSize := int64(len(cd.domain) + len(cd.role) + len(cd.proxyForPrincipal))
+	if cd.token == nil {
+		return structSize + stringSize
+	}
+	rtStructSize := int64(unsafe.Sizeof(*(cd.token)))
+	rtStringSize := int64(len(cd.token.Token))
+	return structSize + stringSize + rtStructSize + rtStringSize
 }
 
 // fetchRoleToken fetch the role token from Athenz server, and return the decoded role token and any error if occurred.

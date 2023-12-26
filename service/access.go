@@ -371,10 +371,17 @@ func (a *accessService) updateAccessToken(ctx context.Context, domain, role, pro
 			expiry:            expTime.Unix(),
 			scope:             at.Scope,
 		}
+		oldTokenCacheData, _ := a.tokenCache.Get(key)
 		a.tokenCache.SetWithExpire(key, acd, expTime.Sub(expTimeDelta))
-
-		a.memoryUsage += accessCacheMemoryUsage(acd)
-		a.memoryUsage += int64(len(key))
+		if oldTokenCacheData != nil {
+			if oldTokenCache, ok := oldTokenCacheData.(*accessCacheData); ok {
+				oldTokenCacheSize := accessCacheMemoryUsage(oldTokenCache)
+				a.memoryUsage += accessCacheMemoryUsage(acd) - oldTokenCacheSize
+			}
+		} else {
+			a.memoryUsage += accessCacheMemoryUsage(acd)
+			a.memoryUsage += int64(len(key))
+		}
 
 		glg.Debugf("token is cached, domain: %s, role: %s, proxyForPrincipal: %s, expiry time: %v", domain, role, proxyForPrincipal, expTime.Unix())
 		return at, nil
@@ -387,15 +394,10 @@ func (a *accessService) updateAccessToken(ctx context.Context, domain, role, pro
 }
 
 func accessCacheMemoryUsage(acd *accessCacheData) int64 {
-	tokenSize := int64(unsafe.Sizeof(acd.token)) + int64(len(acd.token))
-	domainSize := int64(unsafe.Sizeof(acd.domain)) + int64(len(acd.domain))
-	roleSize := int64(unsafe.Sizeof(acd.role)) + int64(len(acd.role))
-	proxySize := int64(unsafe.Sizeof(acd.proxyForPrincipal)) + int64(len(acd.proxyForPrincipal))
-	expiresInSize := int64(unsafe.Sizeof(acd.expiresIn))
-	expirySize := int64(unsafe.Sizeof(acd.expiry))
-	scopeSize := int64(unsafe.Sizeof(acd.scope)) + int64(len(acd.scope))
+	structSize := int64(unsafe.Sizeof(*acd))
+	stringSize := int64(len(acd.token) + len(acd.domain) + len(acd.role) + len(acd.proxyForPrincipal) + len(acd.scope))
 
-	return tokenSize + domainSize + roleSize + proxySize + expiresInSize + expirySize + scopeSize
+	return structSize + stringSize
 }
 
 // fetchAccessToken fetches the access token from Athenz server, and returns the AccessTokenResponse or any error occurred.
