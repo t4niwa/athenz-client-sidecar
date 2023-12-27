@@ -158,6 +158,7 @@ func (t *clientd) Start(ctx context.Context) chan []error {
 		}()
 	}
 
+	// start token cache report daemon (no need for graceful shutdown)
 	reportTicker := time.NewTicker(time.Minute)
 	go func() {
 		defer reportTicker.Stop()
@@ -176,7 +177,6 @@ func (t *clientd) Start(ctx context.Context) chan []error {
 	return t.server.ListenAndServe(ctx)
 }
 
-// start token cache report daemon (no need for graceful shutdown)
 func report(t *clientd) {
 	// gather golang metrics
 	const sysMemMetric = "/memory/classes/total:bytes"                  // go_memstats_sys_bytes

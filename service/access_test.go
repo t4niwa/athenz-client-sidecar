@@ -894,9 +894,9 @@ func Test_accessService_TokenCacheSize(t *testing.T) {
 			return test{
 				name: "TokenCacheSize exactly return memoryUsage field",
 				fields: fields{
-					memoryUsage: 100,
+					memoryUsage: 126,
 				},
-				want: 100,
+				want: 141,
 			}
 		}(),
 	}
@@ -907,7 +907,7 @@ func Test_accessService_TokenCacheSize(t *testing.T) {
 			}
 			got := a.TokenCacheSize()
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("roleService.TokenCacheSize() = %v, want %v", got, tt.want)
+				t.Errorf("accessService.TokenCacheSize() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -2072,12 +2072,120 @@ func Test_accessService_updateAccessToken(t *testing.T) {
 	}
 }
 
-// TODO:
 func Test_accessService_storeTokenCache(t *testing.T) {
+	type fields struct {
+		tokenCache  gache.Gache
+		memoryUsage int64
+	}
+	type args struct {
+		key          string
+		acd          *accessCacheData
+		expTimeDelta time.Time
+		expTime      *jwt.NumericDate
+	}
+	type test struct {
+		name   string
+		fields fields
+		args   args
+		want   int64
+	}
+	tests := []test{
+		func() test {
+			return test{
+				name: "storeTokenCache store correct memoryUsage when cache does not exist",
+				fields: fields{
+					tokenCache:  gache.New(),
+					memoryUsage: 0,
+				},
+				args: args{
+					key: "dummy",
+					acd: &accessCacheData{
+						token: "dummyToken",
+					},
+					expTimeDelta: time.Now().Add(time.Minute),
+					expTime:      &jwt.NumericDate{Time: time.Now().Add(time.Minute)},
+				},
+				want: 124,
+			}
+		}(),
+		func() test {
+			dummyTok := "dummyToken"
+
+			tokenCache := gache.New()
+			tokenCache.SetWithExpire("dummy", &accessCacheData{
+				token: dummyTok,
+			}, time.Minute)
+
+			return test{
+				name: "storeTokenCache store correct memoryUsage when cache already exists",
+				fields: fields{
+					tokenCache:  tokenCache,
+					memoryUsage: 111,
+				},
+				args: args{
+					key: "dummy",
+					acd: &accessCacheData{
+						token: "dummyToken2",
+					},
+					expTimeDelta: time.Now().Add(time.Minute),
+					expTime:      &jwt.NumericDate{Time: time.Now().Add(time.Minute)},
+				},
+				want: 126,
+			}
+		}(),
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &accessService{
+				tokenCache:  tt.fields.tokenCache,
+				memoryUsage: tt.fields.memoryUsage,
+			}
+
+			a.storeTokenCache(tt.args.key, tt.args.acd, tt.args.expTimeDelta, tt.args.expTime)
+			got := a.TokenCacheSize()
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("accessService.storeTokenCache() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
-// TODO:
 func Test_accessService_accessCacheMemoryUsage(t *testing.T) {
+	type args struct {
+		acd *accessCacheData
+	}
+	type test struct {
+		name string
+		args args
+		want int64
+	}
+	tests := []test{
+		func() test {
+			return test{
+				name: "accessCacheMemoryUsage return correct memory usage",
+				args: args{
+					acd: &accessCacheData{
+						token:             "dummyToken",
+						domain:            "dummyDomain",
+						role:              "dummyRole",
+						proxyForPrincipal: "dummyProxyForPrincipal",
+						expiresIn:         0,
+						expiry:            time.Now().Add(60 * time.Second).Unix(),
+						scope:             "dummyDomain:dummyRole",
+					},
+				},
+				want: 169,
+			}
+		}(),
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := accessCacheMemoryUsage(tt.args.acd)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("accessService.CacheMemoryUsage() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func Test_accessService_fetchAccessToken(t *testing.T) {

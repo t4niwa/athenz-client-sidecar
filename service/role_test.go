@@ -857,7 +857,7 @@ func Test_roleService_TokenCacheSize(t *testing.T) {
 				fields: fields{
 					memoryUsage: 100,
 				},
-				want: 100,
+				want: 112,
 			}
 		}(),
 	}
@@ -2015,7 +2015,7 @@ func Test_roleService_storeTokenCache(t *testing.T) {
 	tests := []test{
 		func() test {
 			return test{
-				name: "storeTokenCache store correct memoryUsage",
+				name: "storeTokenCache store correct memoryUsage when cache does not exist",
 				fields: fields{
 					domainRoleCache: gache.New(),
 					memoryUsage:     0,
@@ -2031,7 +2031,7 @@ func Test_roleService_storeTokenCache(t *testing.T) {
 					expTimeDelta: time.Now().Add(time.Minute),
 					expTime:      0,
 				},
-				want: 111,
+				want: 124,
 			}
 		}(),
 		func() test {
@@ -2049,10 +2049,10 @@ func Test_roleService_storeTokenCache(t *testing.T) {
 			})
 
 			return test{
-				name: "storeTokenCache store correct memoryUsage",
+				name: "storeTokenCache store correct memoryUsage when cache already exists",
 				fields: fields{
 					domainRoleCache: domainRoleCache,
-					memoryUsage:     111,
+					memoryUsage:     126,
 				},
 				args: args{
 					key: "dummy",
@@ -2065,7 +2065,7 @@ func Test_roleService_storeTokenCache(t *testing.T) {
 					expTimeDelta: time.Now().Add(time.Minute),
 					expTime:      0,
 				},
-				want: 112,
+				want: 142,
 			}
 		}(),
 	}
