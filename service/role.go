@@ -33,7 +33,7 @@ import (
 
 	"github.com/AthenZ/athenz-client-sidecar/v2/config"
 	"github.com/kpango/fastime"
-	"github.com/kpango/gache"
+	"github.com/kpango/gache/v2"
 	"github.com/kpango/glg"
 	"github.com/kpango/ntokend"
 	"github.com/pkg/errors"
@@ -56,7 +56,7 @@ type roleService struct {
 	token                 ntokend.TokenProvider
 	athenzURL             string
 	athenzPrincipleHeader string
-	domainRoleCache       gache.Gache
+	domainRoleCache       gache.Gache[any]
 	memoryUsage           int64
 	group                 singleflight.Group
 	expiry                time.Duration
@@ -210,7 +210,7 @@ func NewRoleService(cfg config.RoleToken, token ntokend.TokenProvider) (RoleServ
 		token:                 token,
 		athenzURL:             cfg.AthenzURL,
 		athenzPrincipleHeader: cfg.PrincipalAuthHeader,
-		domainRoleCache:       gache.New(),
+		domainRoleCache:       gache.New[any](),
 		memoryUsage:           0,
 		expiry:                exp,
 		httpClient:            httpClient,
@@ -279,7 +279,7 @@ func (r *roleService) RefreshRoleTokenCache(ctx context.Context) <-chan error {
 	go func() {
 		defer close(echan)
 
-		r.domainRoleCache.Foreach(ctx, func(key string, val interface{}, exp int64) bool {
+		r.domainRoleCache.Range(ctx, func(key string, val interface{}, exp int64) bool {
 			domain, role, principal := decode(key)
 			cd := val.(*cacheData)
 
