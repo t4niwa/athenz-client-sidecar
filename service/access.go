@@ -32,7 +32,7 @@ import (
 	"github.com/AthenZ/athenz-client-sidecar/v2/config"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/kpango/fastime"
-	"github.com/kpango/gache"
+	"github.com/kpango/gache/v2"
 	"github.com/kpango/glg"
 	"github.com/kpango/ntokend"
 	"github.com/pkg/errors"
@@ -54,7 +54,7 @@ type accessService struct {
 	token                 ntokend.TokenProvider
 	athenzURL             string
 	athenzPrincipleHeader string
-	tokenCache            gache.Gache
+	tokenCache            gache.Gache[any]
 	memoryUsage           int64
 	group                 singleflight.Group
 	expiry                time.Duration
@@ -197,7 +197,7 @@ func NewAccessService(cfg config.AccessToken, token ntokend.TokenProvider) (Acce
 		token:                 token,
 		athenzURL:             cfg.AthenzURL,
 		athenzPrincipleHeader: cfg.PrincipalAuthHeader,
-		tokenCache:            gache.New(),
+		tokenCache:            gache.New[any](),
 		memoryUsage:           0,
 		expiry:                exp,
 		httpClient:            httpClient,
@@ -275,7 +275,7 @@ func (a *accessService) RefreshAccessTokenCache(ctx context.Context) <-chan erro
 	go func() {
 		defer close(echan)
 
-		a.tokenCache.Foreach(ctx, func(key string, val interface{}, exp int64) bool {
+		a.tokenCache.Range(ctx, func(key string, val interface{}, exp int64) bool {
 			domain, role, principal := decode(key)
 			cd := val.(*accessCacheData)
 
@@ -290,12 +290,7 @@ func (a *accessService) RefreshAccessTokenCache(ctx context.Context) <-chan erro
 }
 
 func (a *accessService) TokenCacheLen() int {
-	cacheLen := 0
-	a.tokenCache.Foreach(context.Background(), func(key string, val interface{}, exp int64) bool {
-		cacheLen += 1
-		return true
-	})
-	return cacheLen
+	return a.tokenCache.Len()
 }
 
 func (a *accessService) TokenCacheSize() int64 {
