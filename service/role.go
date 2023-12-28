@@ -29,10 +29,11 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/AthenZ/athenz-client-sidecar/v2/config"
 	"github.com/kpango/fastime"
-	"github.com/kpango/gache"
+	"github.com/kpango/gache/v2"
 	"github.com/kpango/glg"
 	"github.com/kpango/ntokend"
 	"github.com/pkg/errors"
@@ -44,6 +45,9 @@ type RoleService interface {
 	StartRoleUpdater(context.Context) <-chan error
 	RefreshRoleTokenCache(ctx context.Context) <-chan error
 	GetRoleProvider() RoleProvider
+	TokenCacheLen() int
+	TokenCacheSize() int64
+	StoreTokenCache(string, string, string, string) // TODO: remove this function
 }
 
 // roleService represents the implementation of Athenz RoleService
@@ -52,7 +56,8 @@ type roleService struct {
 	token                 ntokend.TokenProvider
 	athenzURL             string
 	athenzPrincipleHeader string
-	domainRoleCache       gache.Gache
+	domainRoleCache       gache.Gache[any]
+	memoryUsage           int64
 	group                 singleflight.Group
 	expiry                time.Duration
 	httpClient            atomic.Value
@@ -205,7 +210,8 @@ func NewRoleService(cfg config.RoleToken, token ntokend.TokenProvider) (RoleServ
 		token:                 token,
 		athenzURL:             cfg.AthenzURL,
 		athenzPrincipleHeader: cfg.PrincipalAuthHeader,
-		domainRoleCache:       gache.New(),
+		domainRoleCache:       gache.New[any](),
+		memoryUsage:           0,
 		expiry:                exp,
 		httpClient:            httpClient,
 		rootCAs:               cp,
@@ -244,7 +250,8 @@ func (r *roleService) StartRoleUpdater(ctx context.Context) <-chan error {
 
 	r.domainRoleCache.StartExpired(ctx, cachePurgePeriod)
 	r.domainRoleCache.EnableExpiredHook().SetExpiredHook(func(ctx context.Context, k string) {
-		glg.Warnf("the following cache is expired, key: %v", k)
+		glg.Warnf("unexpected cache expiry, please review your refreshPeriod and expiry configuration, and related token expiry in the request body, key: %v", k)
+		glg.Warnf("the expired token data is still counted in the cache memory usage estimation even the allocated memory is freed, which causes over-estimation in the cache memory usage log message")
 	})
 	return ech
 }
@@ -272,7 +279,7 @@ func (r *roleService) RefreshRoleTokenCache(ctx context.Context) <-chan error {
 	go func() {
 		defer close(echan)
 
-		r.domainRoleCache.Foreach(ctx, func(key string, val interface{}, exp int64) bool {
+		r.domainRoleCache.Range(ctx, func(key string, val interface{}, exp int64) bool {
 			domain, role, principal := decode(key)
 			cd := val.(*cacheData)
 
@@ -284,6 +291,31 @@ func (r *roleService) RefreshRoleTokenCache(ctx context.Context) <-chan error {
 	}()
 
 	return echan
+}
+
+func (r *roleService) TokenCacheLen() int {
+	return r.domainRoleCache.Len()
+}
+
+func (r *roleService) TokenCacheSize() int64 {
+	// To estimate the memory usage of the cache,
+	// we multiply memoryUsage by 1.125　to account for overhead of map structure
+	return int64(float64(r.memoryUsage) * 1.125)
+}
+
+// TODO: remove this function
+func (r *roleService) StoreTokenCache(key, token, domain, role string) {
+	rcd := &cacheData{
+		domain: domain,
+		role:   role,
+		token: &RoleToken{
+			Token:      token,
+			ExpiryTime: 0,
+		},
+	}
+	r.domainRoleCache.SetWithExpire(key, rcd, -1)
+	r.memoryUsage += roleCacheMemoryUsage(rcd)
+	r.memoryUsage += int64(len(key))
 }
 
 // updateRoleTokenWithRetry wraps updateRoleToken with retry logic.
@@ -320,15 +352,16 @@ func (r *roleService) updateRoleToken(ctx context.Context, domain, role, proxyFo
 			return nil, e
 		}
 
-		r.domainRoleCache.SetWithExpire(key, &cacheData{
+		cd := &cacheData{
 			token:             rt,
 			domain:            domain,
 			role:              role,
 			proxyForPrincipal: proxyForPrincipal,
 			minExpiry:         minExpiry,
 			maxExpiry:         maxExpiry,
-		}, time.Unix(rt.ExpiryTime, 0).Sub(expTimeDelta))
+		}
 
+		r.storeTokenCache(key, cd, expTimeDelta, rt.ExpiryTime)
 		glg.Debugf("token is cached, domain: %s, role: %s, proxyForPrincipal: %s, expiry time: %v", domain, role, proxyForPrincipal, rt.ExpiryTime)
 		return rt, nil
 	})
@@ -337,6 +370,34 @@ func (r *roleService) updateRoleToken(ctx context.Context, domain, role, proxyFo
 	}
 
 	return rt.(*RoleToken), err
+}
+
+func (r *roleService) storeTokenCache(key string, cd *cacheData, expTimeDelta time.Time, expTime int64) {
+	oldTokenCacheData, _ := r.domainRoleCache.Get(key)
+	r.domainRoleCache.SetWithExpire(key, cd, time.Unix(expTime, 0).Sub(expTimeDelta))
+	if oldTokenCacheData != nil {
+		if oldTokenCache, ok := oldTokenCacheData.(*cacheData); ok {
+			oldTokenCacheSize := roleCacheMemoryUsage(oldTokenCache)
+			r.memoryUsage += roleCacheMemoryUsage(cd) - oldTokenCacheSize
+			return
+		}
+	} else {
+		r.memoryUsage += roleCacheMemoryUsage(cd)
+		r.memoryUsage += int64(len(key))
+		return
+	}
+	return
+}
+
+func roleCacheMemoryUsage(cd *cacheData) int64 {
+	structSize := int64(unsafe.Sizeof(*cd))
+	stringSize := int64(len(cd.domain) + len(cd.role) + len(cd.proxyForPrincipal))
+	if cd.token == nil {
+		return structSize + stringSize
+	}
+	rtStructSize := int64(unsafe.Sizeof(*(cd.token)))
+	rtStringSize := int64(len(cd.token.Token))
+	return structSize + stringSize + rtStructSize + rtStringSize
 }
 
 // fetchRoleToken fetch the role token from Athenz server, and return the decoded role token and any error if occurred.

@@ -27,11 +27,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/AthenZ/athenz-client-sidecar/v2/config"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/kpango/fastime"
-	"github.com/kpango/gache"
+	"github.com/kpango/gache/v2"
 	"github.com/kpango/glg"
 	"github.com/kpango/ntokend"
 	"github.com/pkg/errors"
@@ -43,6 +44,9 @@ type AccessService interface {
 	StartAccessUpdater(context.Context) <-chan error
 	RefreshAccessTokenCache(ctx context.Context) <-chan error
 	GetAccessProvider() AccessProvider
+	TokenCacheLen() int
+	TokenCacheSize() int64
+	StoreTokenCache(string, string, string, string) // TODO: remove this function
 }
 
 // accessService represents the implementation of Athenz AccessService
@@ -51,7 +55,8 @@ type accessService struct {
 	token                 ntokend.TokenProvider
 	athenzURL             string
 	athenzPrincipleHeader string
-	tokenCache            gache.Gache
+	tokenCache            gache.Gache[any]
+	memoryUsage           int64
 	group                 singleflight.Group
 	expiry                time.Duration
 	httpClient            atomic.Value
@@ -193,7 +198,8 @@ func NewAccessService(cfg config.AccessToken, token ntokend.TokenProvider) (Acce
 		token:                 token,
 		athenzURL:             cfg.AthenzURL,
 		athenzPrincipleHeader: cfg.PrincipalAuthHeader,
-		tokenCache:            gache.New(),
+		tokenCache:            gache.New[any](),
+		memoryUsage:           0,
 		expiry:                exp,
 		httpClient:            httpClient,
 		rootCAs:               cp,
@@ -232,7 +238,8 @@ func (a *accessService) StartAccessUpdater(ctx context.Context) <-chan error {
 
 	a.tokenCache.StartExpired(ctx, cachePurgePeriod)
 	a.tokenCache.EnableExpiredHook().SetExpiredHook(func(ctx context.Context, k string) {
-		glg.Warnf("the following cache is expired, key: %v", k)
+		glg.Warnf("unexpected cache expiry, please review your refreshPeriod and expiry configuration, and related token expiry in the request body, key: %v", k)
+		glg.Warnf("the expired token data is still counted in the cache memory usage estimation even the allocated memory is freed, which causes over-estimation in the cache memory usage log message")
 	})
 	return ech
 }
@@ -269,7 +276,7 @@ func (a *accessService) RefreshAccessTokenCache(ctx context.Context) <-chan erro
 	go func() {
 		defer close(echan)
 
-		a.tokenCache.Foreach(ctx, func(key string, val interface{}, exp int64) bool {
+		a.tokenCache.Range(ctx, func(key string, val interface{}, exp int64) bool {
 			domain, role, principal := decode(key)
 			cd := val.(*accessCacheData)
 
@@ -281,6 +288,30 @@ func (a *accessService) RefreshAccessTokenCache(ctx context.Context) <-chan erro
 	}()
 
 	return echan
+}
+
+func (a *accessService) TokenCacheLen() int {
+	return a.tokenCache.Len()
+}
+
+func (a *accessService) TokenCacheSize() int64 {
+	// To estimate the memory usage of the cache,
+	// we multiply memoryUsage by 1.125　to account for overhead of map structure
+	return int64(float64(a.memoryUsage) * 1.125)
+}
+
+// TODO: remove this function
+func (a *accessService) StoreTokenCache(key, domain, token, role string) {
+	acd := &accessCacheData{
+		token:  string(token),
+		domain: domain,
+		role:   role,
+		expiry: 0,
+		scope:  "",
+	}
+	a.tokenCache.SetWithExpire(key, acd, -1)
+	a.memoryUsage += int64(accessCacheMemoryUsage(acd))
+	a.memoryUsage += int64(len(key))
 }
 
 // updateAccessTokenWithRetry wraps updateAccessToken with retry logic.
@@ -327,7 +358,7 @@ func (a *accessService) updateAccessToken(ctx context.Context, domain, role, pro
 			return nil, fmt.Errorf("jwt.GetExpirationTime() err: %v", err)
 		}
 
-		a.tokenCache.SetWithExpire(key, &accessCacheData{
+		acd := &accessCacheData{
 			token:             at.AccessToken,
 			domain:            domain,
 			role:              role,
@@ -335,8 +366,9 @@ func (a *accessService) updateAccessToken(ctx context.Context, domain, role, pro
 			expiresIn:         expiresIn,
 			expiry:            expTime.Unix(),
 			scope:             at.Scope,
-		}, expTime.Sub(expTimeDelta))
+		}
 
+		a.storeTokenCache(key, acd, expTimeDelta, expTime)
 		glg.Debugf("token is cached, domain: %s, role: %s, proxyForPrincipal: %s, expiry time: %v", domain, role, proxyForPrincipal, expTime.Unix())
 		return at, nil
 	})
@@ -345,6 +377,29 @@ func (a *accessService) updateAccessToken(ctx context.Context, domain, role, pro
 	}
 
 	return at.(*AccessTokenResponse), err
+}
+
+func (a *accessService) storeTokenCache(key string, acd *accessCacheData, expTimeDelta time.Time, expTime *jwt.NumericDate) {
+	oldTokenCacheData, _ := a.tokenCache.Get(key)
+	a.tokenCache.SetWithExpire(key, acd, expTime.Sub(expTimeDelta))
+	if oldTokenCacheData != nil {
+		if oldTokenCache, ok := oldTokenCacheData.(*accessCacheData); ok {
+			oldTokenCacheSize := accessCacheMemoryUsage(oldTokenCache)
+			a.memoryUsage += accessCacheMemoryUsage(acd) - oldTokenCacheSize
+			return
+		}
+		a.memoryUsage += accessCacheMemoryUsage(acd)
+		return
+	}
+	a.memoryUsage += accessCacheMemoryUsage(acd) + int64(len(key))
+	return
+}
+
+func accessCacheMemoryUsage(acd *accessCacheData) int64 {
+	structSize := int64(unsafe.Sizeof(*acd))
+	stringSize := int64(len(acd.token) + len(acd.domain) + len(acd.role) + len(acd.proxyForPrincipal) + len(acd.scope))
+
+	return structSize + stringSize
 }
 
 // fetchAccessToken fetches the access token from Athenz server, and returns the AccessTokenResponse or any error occurred.
